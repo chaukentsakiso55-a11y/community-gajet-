@@ -1,7 +1,10 @@
 package za.co.cyberpulse.communitygadget.alert
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
@@ -14,12 +17,15 @@ import za.co.cyberpulse.communitygadget.domain.AlertLevel
 class AlarmController(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var toneGenerator: ToneGenerator? = null
+    private var emergencyRingtone: Ringtone? = null
     private var emergencyActive = false
 
     private val alarmPulse = object : Runnable {
         override fun run() {
             if (!emergencyActive) return
-            tone().startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 850)
+            if (emergencyRingtone?.isPlaying != true) {
+                tone().startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 850)
+            }
             handler.postDelayed(this, 1_250L)
         }
     }
@@ -39,12 +45,17 @@ class AlarmController(private val context: Context) {
         if (emergencyActive) return
         emergencyActive = true
         vibrate(longArrayOf(0, 700, 250, 700, 250), repeat = 1)
+        emergencyRingtone = createEmergencyRingtone()?.also { ringtone ->
+            runCatching { ringtone.play() }
+        }
         handler.post(alarmPulse)
     }
 
     fun acknowledge() {
         emergencyActive = false
         handler.removeCallbacks(alarmPulse)
+        emergencyRingtone?.let { ringtone -> runCatching { ringtone.stop() } }
+        emergencyRingtone = null
         toneGenerator?.stopTone()
         vibrator().cancel()
     }
@@ -54,6 +65,20 @@ class AlarmController(private val context: Context) {
         toneGenerator?.release()
         toneGenerator = null
     }
+
+    private fun createEmergencyRingtone(): Ringtone? = runCatching {
+        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        RingtoneManager.getRingtone(context, uri)?.apply {
+            audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                isLooping = true
+            }
+        }
+    }.getOrNull()
 
     private fun tone(): ToneGenerator = toneGenerator ?: ToneGenerator(AudioManager.STREAM_ALARM, 100)
         .also { toneGenerator = it }
