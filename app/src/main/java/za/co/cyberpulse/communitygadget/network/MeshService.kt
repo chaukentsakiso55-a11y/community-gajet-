@@ -13,7 +13,8 @@ import za.co.cyberpulse.communitygadget.domain.AlertLevel
 import java.util.LinkedHashMap
 
 class MeshService : Service() {
-    private lateinit var meshManager: NearbyMeshManager
+    private lateinit var nearbyMeshManager: NearbyMeshManager
+    private lateinit var lanMeshManager: LanMeshManager
     private lateinit var alarmController: AlarmController
     private lateinit var notificationManager: AlertNotificationManager
     private val seenAlerts = object : LinkedHashMap<String, Long>(128, 0.75f, true) {
@@ -27,11 +28,16 @@ class MeshService : Service() {
             stopSelf()
             return
         }
+
         alarmController = AlarmController(this)
         notificationManager = AlertNotificationManager(this).also { it.createChannels() }
         startForeground(AlertNotificationManager.MESH_NOTIFICATION_ID, notificationManager.meshNotification())
-        meshManager = NearbyMeshManager(this, config.terminalName, ::receivePayload)
-        meshManager.start()
+
+        nearbyMeshManager = NearbyMeshManager(this, config.terminalName, ::receiveNearbyPayload)
+        lanMeshManager = LanMeshManager(this, ::receiveLanPayload)
+        lanMeshManager.start()
+        nearbyMeshManager.start()
+        MeshRuntime.setStatus("Nearby + Wi-Fi LAN listening")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,7 +52,8 @@ class MeshService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        if (::meshManager.isInitialized) meshManager.stop()
+        if (::nearbyMeshManager.isInitialized) nearbyMeshManager.stop()
+        if (::lanMeshManager.isInitialized) lanMeshManager.stop()
         if (::alarmController.isInitialized) alarmController.release()
         MeshRuntime.setStatus("Mesh stopped")
         super.onDestroy()
@@ -56,21 +63,41 @@ class MeshService : Service() {
         val alert = verify(payload) ?: return
         synchronized(seenAlerts) { seenAlerts[alert.id] = System.currentTimeMillis() }
         handleTrustedAlert(alert)
-        meshManager.broadcast(payload)
+        nearbyMeshManager.broadcast(payload)
+        lanMeshManager.broadcast(payload)
     }
 
-    private fun receivePayload(sourceEndpointId: String, payload: ByteArray) {
-        val alert = verify(payload) ?: return
+    private fun receiveNearbyPayload(sourceEndpointId: String, payload: ByteArray) {
+        val alert = verifyAndMarkNew(payload) ?: return
+        handleTrustedAlert(alert)
+        nearbyMeshManager.broadcast(payload, excludeEndpointId = sourceEndpointId)
+        lanMeshManager.broadcast(payload)
+    }
+
+    private fun receiveLanPayload(sourceAddress: String, payload: ByteArray) {
+        val alert = verifyAndMarkNew(payload) ?: return
+        handleTrustedAlert(alert)
+        nearbyMeshManager.broadcast(payload)
+        MeshRuntime.setStatus(
+            if (alert.level == AlertLevel.EMERGENCY) {
+                "Emergency received over Wi-Fi LAN from $sourceAddress"
+            } else {
+                "Nearby + Wi-Fi LAN listening"
+            }
+        )
+    }
+
+    private fun verifyAndMarkNew(payload: ByteArray): za.co.cyberpulse.communitygadget.domain.EmergencyAlert? {
+        val alert = verify(payload) ?: return null
         val isNew = synchronized(seenAlerts) {
-            if (seenAlerts.containsKey(alert.id)) false
-            else {
+            if (seenAlerts.containsKey(alert.id)) {
+                false
+            } else {
                 seenAlerts[alert.id] = System.currentTimeMillis()
                 true
             }
         }
-        if (!isNew) return
-        handleTrustedAlert(alert)
-        meshManager.broadcast(payload, excludeEndpointId = sourceEndpointId)
+        return if (isNew) alert else null
     }
 
     private fun verify(payload: ByteArray) =
@@ -83,14 +110,14 @@ class MeshService : Service() {
         alarmController.announce(alert.level)
         notificationManager.showAlert(alert)
         MeshRuntime.setStatus(
-            if (alert.level == AlertLevel.EMERGENCY) "Emergency alert active" else "Offline mesh listening"
+            if (alert.level == AlertLevel.EMERGENCY) "Emergency alert active" else "Nearby + Wi-Fi LAN listening"
         )
     }
 
     private fun acknowledgeCurrentAlert() {
         alarmController.acknowledge()
         notificationManager.cancelAlert()
-        MeshRuntime.setStatus("Alert acknowledged — mesh listening")
+        MeshRuntime.setStatus("Alert acknowledged — Nearby + Wi-Fi LAN listening")
     }
 
     companion object {
