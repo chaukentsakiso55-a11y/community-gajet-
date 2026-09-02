@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         permissionsReady.value = AppPermissions.allGranted(this)
-        if (permissionsReady.value) viewModel.startMesh()
+        if (viewModel.config.value != null) viewModel.startMesh()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +41,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         permissionsReady.value = AppPermissions.allGranted(this)
-        if (permissionsReady.value && viewModel.config.value != null) viewModel.startMesh()
+        if (viewModel.config.value != null) viewModel.startMesh()
     }
 }
