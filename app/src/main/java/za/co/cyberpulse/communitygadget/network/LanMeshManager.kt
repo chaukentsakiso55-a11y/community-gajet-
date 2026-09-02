@@ -20,8 +20,7 @@ class LanMeshManager(
     private val running = AtomicBoolean(false)
     private val sendExecutor = Executors.newSingleThreadExecutor()
 
-    @Volatile
-    private var receiveSocket: DatagramSocket? = null
+    @Volatile private var receiveSocket: DatagramSocket? = null
     private var receiveThread: Thread? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
@@ -58,6 +57,7 @@ class LanMeshManager(
         receiveThread = null
         sendExecutor.shutdownNow()
         releaseWifiLock()
+        MeshRuntime.setLanReady(false)
     }
 
     private fun receiveLoop() {
@@ -68,19 +68,16 @@ class LanMeshManager(
                 bind(InetSocketAddress(PORT))
             }
             receiveSocket = socket
+            MeshRuntime.setLanReady(true)
             val buffer = ByteArray(MAX_PACKET_SIZE)
-
             while (running.get()) {
                 val packet = DatagramPacket(buffer, buffer.size)
                 try {
                     socket.receive(packet)
                 } catch (error: SocketException) {
-                    if (running.get()) {
-                        MeshRuntime.setStatus("Wi-Fi LAN listener stopped: ${error.localizedMessage ?: "socket error"}")
-                    }
+                    if (running.get()) MeshRuntime.setStatus("Wi-Fi LAN listener stopped")
                     break
                 }
-
                 if (!hasMagic(packet)) continue
                 val start = packet.offset + MAGIC.size
                 val end = packet.offset + packet.length
@@ -89,10 +86,9 @@ class LanMeshManager(
                 onPayload("lan:$source", payload)
             }
         } catch (error: Exception) {
-            if (running.get()) {
-                MeshRuntime.setStatus("Wi-Fi LAN unavailable: ${error.localizedMessage ?: "network error"}")
-            }
+            if (running.get()) MeshRuntime.setStatus("Wi-Fi LAN unavailable")
         } finally {
+            MeshRuntime.setLanReady(false)
             receiveSocket?.close()
             receiveSocket = null
         }
@@ -100,9 +96,7 @@ class LanMeshManager(
 
     private fun hasMagic(packet: DatagramPacket): Boolean {
         if (packet.length <= MAGIC.size) return false
-        for (index in MAGIC.indices) {
-            if (packet.data[packet.offset + index] != MAGIC[index]) return false
-        }
+        for (index in MAGIC.indices) if (packet.data[packet.offset + index] != MAGIC[index]) return false
         return true
     }
 
@@ -113,9 +107,7 @@ class LanMeshManager(
             Collections.list(NetworkInterface.getNetworkInterfaces())
                 .filter { network -> network.isUp && !network.isLoopback }
                 .forEach { network ->
-                    network.interfaceAddresses
-                        .mapNotNull { it.broadcast }
-                        .forEach(targets::add)
+                    network.interfaceAddresses.mapNotNull { it.broadcast }.forEach(targets::add)
                 }
         }
         return targets
@@ -134,15 +126,13 @@ class LanMeshManager(
     }
 
     private fun releaseWifiLock() {
-        wifiLock?.let { lock ->
-            if (lock.isHeld) runCatching { lock.release() }
-        }
+        wifiLock?.let { lock -> if (lock.isHeld) runCatching { lock.release() } }
         wifiLock = null
     }
 
     private companion object {
         const val PORT = 45873
         const val MAX_PACKET_SIZE = 16 * 1024
-        val MAGIC = byteArrayOf(0x43, 0x47, 0x4C, 0x31)
+        val MAGIC = byteArrayOf(0x43, 0x47, 0x4C, 0x32)
     }
 }
