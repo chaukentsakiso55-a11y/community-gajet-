@@ -30,7 +30,11 @@ class AlarmController(private val context: Context) {
         }
     }
 
-    fun announce(level: AlertLevel) {
+    fun announce(level: AlertLevel, isTest: Boolean = false) {
+        if (isTest) {
+            announceTest()
+            return
+        }
         when (level) {
             AlertLevel.SECURE -> tone().startTone(ToneGenerator.TONE_PROP_ACK, 180)
             AlertLevel.MONITOR -> {
@@ -39,6 +43,12 @@ class AlarmController(private val context: Context) {
             }
             AlertLevel.EMERGENCY -> startEmergency()
         }
+    }
+
+    private fun announceTest() {
+        acknowledge()
+        tone().startTone(ToneGenerator.TONE_PROP_BEEP2, 700)
+        vibrate(longArrayOf(0, 180, 120, 180), repeat = -1)
     }
 
     fun startEmergency() {
@@ -74,9 +84,7 @@ class AlarmController(private val context: Context) {
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                isLooping = true
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
         }
     }.getOrNull()
 
