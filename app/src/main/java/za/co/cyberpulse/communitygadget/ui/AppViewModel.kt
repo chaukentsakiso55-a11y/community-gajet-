@@ -7,10 +7,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import za.co.cyberpulse.communitygadget.CommunityGadgetApplication
-import za.co.cyberpulse.communitygadget.data.TerminalConfig
-import za.co.cyberpulse.communitygadget.domain.AlertCodec
 import za.co.cyberpulse.communitygadget.domain.AlertLevel
-import za.co.cyberpulse.communitygadget.domain.EmergencyAlert
+import za.co.cyberpulse.communitygadget.domain.CommunityMessage
+import za.co.cyberpulse.communitygadget.domain.CommunityMessageCodec
+import za.co.cyberpulse.communitygadget.domain.CommunityMessageType
 import za.co.cyberpulse.communitygadget.location.EmergencyLocationProvider
 import za.co.cyberpulse.communitygadget.network.MeshRuntime
 import za.co.cyberpulse.communitygadget.network.MeshService
@@ -29,6 +29,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val meshStatus = MeshRuntime.status
     val connectedPeers = MeshRuntime.connectedPeers
     val alerts = MeshRuntime.alerts
+    val activeAlert = MeshRuntime.activeAlert
+    val progress = MeshRuntime.progress
+    val silencedAlertIds = MeshRuntime.silencedAlertIds
+    val nearbyReady = MeshRuntime.nearbyReady
+    val lanReady = MeshRuntime.lanReady
+    val internetAvailable = MeshRuntime.internetAvailable
+    val lastTransport = MeshRuntime.lastTransport
 
     fun completeSetup(terminalName: String, communityCode: String): Result<Unit> = runCatching {
         require(terminalName.trim().length >= 3) { "Enter a terminal or home name" }
@@ -40,38 +47,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_config.value != null) MeshService.start(getApplication())
     }
 
-    fun sendAlert(level: AlertLevel) {
+    fun sendAlert(level: AlertLevel) = sendAlertInternal(level, isTest = false)
+
+    fun sendTestAlert() = sendAlertInternal(AlertLevel.EMERGENCY, isTest = true)
+
+    private fun sendAlertInternal(level: AlertLevel, isTest: Boolean) {
         val currentConfig = _config.value ?: return
         if (_isSending.value) return
         viewModelScope.launch {
             _isSending.value = true
             try {
-                val location = if (level == AlertLevel.EMERGENCY) {
+                val location = if (level == AlertLevel.EMERGENCY && !isTest) {
                     locationProvider.currentEmergencyLocation()
-                } else {
-                    null
-                }
-                val unsigned = EmergencyAlert(
-                    id = UUID.randomUUID().toString(),
-                    originId = currentConfig.terminalId,
-                    originName = currentConfig.terminalName,
-                    level = level,
+                } else null
+                val alertId = UUID.randomUUID().toString()
+                val unsigned = CommunityMessage(
+                    messageId = UUID.randomUUID().toString(),
+                    alertId = alertId,
+                    type = CommunityMessageType.ALERT,
+                    actorId = currentConfig.terminalId,
+                    actorName = currentConfig.terminalName,
                     createdAtEpochMs = System.currentTimeMillis(),
+                    level = level,
                     latitude = location?.latitude,
                     longitude = location?.longitude,
-                    accuracyMeters = location?.accuracy
+                    accuracyMeters = location?.accuracy,
+                    isTest = isTest
                 )
-                val signed = AlertCodec.sign(unsigned, currentConfig.communityKey)
-                MeshService.send(getApplication(), AlertCodec.encode(signed))
+                val signed = CommunityMessageCodec.sign(unsigned, currentConfig.communityKey)
+                MeshService.send(getApplication(), CommunityMessageCodec.encode(signed))
             } finally {
                 _isSending.value = false
             }
         }
     }
 
-    fun acknowledgeAlert() {
-        MeshService.acknowledge(getApplication())
-    }
+    fun acknowledgeAlert() = MeshService.acknowledge(getApplication())
+
+    fun respondToAlert() = MeshService.responding(getApplication())
+
+    fun endEmergency() = MeshService.endEmergency(getApplication())
 
     fun resetTerminal() {
         MeshService.stop(getApplication())
