@@ -35,8 +35,12 @@ class NearbyMeshManager(
 
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            client.acceptConnection(endpointId, payloadCallback)
-                .addOnFailureListener { pendingEndpoints.remove(endpointId) }
+            runCatching {
+                client.acceptConnection(endpointId, payloadCallback)
+                    .addOnFailureListener { pendingEndpoints.remove(endpointId) }
+            }.onFailure {
+                pendingEndpoints.remove(endpointId)
+            }
         }
 
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
@@ -56,8 +60,12 @@ class NearbyMeshManager(
     private val discoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             if (connectedEndpoints.contains(endpointId) || !pendingEndpoints.add(endpointId)) return
-            client.requestConnection(endpointName.take(32), endpointId, connectionCallback)
-                .addOnFailureListener { pendingEndpoints.remove(endpointId) }
+            runCatching {
+                client.requestConnection(endpointName.take(32), endpointId, connectionCallback)
+                    .addOnFailureListener { pendingEndpoints.remove(endpointId) }
+            }.onFailure {
+                pendingEndpoints.remove(endpointId)
+            }
         }
 
         override fun onEndpointLost(endpointId: String) {
@@ -67,23 +75,32 @@ class NearbyMeshManager(
 
     fun start() {
         val strategy = Strategy.P2P_CLUSTER
-        client.startAdvertising(
-            endpointName.take(32),
-            SERVICE_ID,
-            connectionCallback,
-            AdvertisingOptions.Builder().setStrategy(strategy).build()
-        ).addOnFailureListener { error ->
-            MeshRuntime.setStatus("Advertising unavailable: ${error.localizedMessage ?: "permission or radio error"}")
+
+        runCatching {
+            client.startAdvertising(
+                endpointName.take(32),
+                SERVICE_ID,
+                connectionCallback,
+                AdvertisingOptions.Builder().setStrategy(strategy).build()
+            ).addOnFailureListener { error ->
+                MeshRuntime.setStatus("Nearby advertising unavailable: ${error.localizedMessage ?: "permission or radio error"}; Wi-Fi LAN still active")
+            }
+        }.onFailure { error ->
+            MeshRuntime.setStatus("Nearby advertising unavailable: ${error.localizedMessage ?: "permission or radio error"}; Wi-Fi LAN still active")
         }
 
-        client.startDiscovery(
-            SERVICE_ID,
-            discoveryCallback,
-            DiscoveryOptions.Builder().setStrategy(strategy).build()
-        ).addOnSuccessListener {
-            MeshRuntime.setStatus("Offline mesh listening")
-        }.addOnFailureListener { error ->
-            MeshRuntime.setStatus("Discovery unavailable: ${error.localizedMessage ?: "permission or radio error"}")
+        runCatching {
+            client.startDiscovery(
+                SERVICE_ID,
+                discoveryCallback,
+                DiscoveryOptions.Builder().setStrategy(strategy).build()
+            ).addOnSuccessListener {
+                MeshRuntime.setStatus("Nearby + Wi-Fi LAN listening")
+            }.addOnFailureListener { error ->
+                MeshRuntime.setStatus("Nearby discovery unavailable: ${error.localizedMessage ?: "permission or radio error"}; Wi-Fi LAN still active")
+            }
+        }.onFailure { error ->
+            MeshRuntime.setStatus("Nearby discovery unavailable: ${error.localizedMessage ?: "permission or radio error"}; Wi-Fi LAN still active")
         }
     }
 
@@ -92,18 +109,23 @@ class NearbyMeshManager(
             connectedEndpoints.filterNot { it == excludeEndpointId }
         }
         targets.forEach { endpointId ->
-            client.sendPayload(endpointId, Payload.fromBytes(payload))
-                .addOnFailureListener {
-                    connectedEndpoints.remove(endpointId)
-                    updatePeerCount()
-                }
+            runCatching {
+                client.sendPayload(endpointId, Payload.fromBytes(payload))
+                    .addOnFailureListener {
+                        connectedEndpoints.remove(endpointId)
+                        updatePeerCount()
+                    }
+            }.onFailure {
+                connectedEndpoints.remove(endpointId)
+                updatePeerCount()
+            }
         }
     }
 
     fun stop() {
-        client.stopAdvertising()
-        client.stopDiscovery()
-        client.stopAllEndpoints()
+        runCatching { client.stopAdvertising() }
+        runCatching { client.stopDiscovery() }
+        runCatching { client.stopAllEndpoints() }
         connectedEndpoints.clear()
         pendingEndpoints.clear()
         updatePeerCount()
