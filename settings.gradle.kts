@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CommunityGadget"
 include(":app")
+include(":controlcenter")
