@@ -18,12 +18,14 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Build and test
+      - name: Build and test both Android apps
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+          ./gradlew testDebugUnitTest :app:assembleDebug :controlcenter:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: community-gadget-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: community-gadget-field-and-control-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            controlcenter/build/outputs/apk/debug/controlcenter-debug.apk
           if-no-files-found: error
