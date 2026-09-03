@@ -128,6 +128,8 @@ object MeshRuntime {
                 if (_activeAlert.value?.alert?.id == message.alertId) _activeAlert.value = null
                 _silencedAlertIds.update { it - message.alertId }
             }
+
+            CommunityMessageType.HEARTBEAT -> Unit
         }
     }
 
