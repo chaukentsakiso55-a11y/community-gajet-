@@ -40,6 +40,7 @@ class MeshService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var locationJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     private val seenMessages = object : LinkedHashMap<String, Long>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > 512
@@ -68,6 +69,7 @@ class MeshService : Service() {
         nearbyMeshManager.start()
         MeshRuntime.setStatus("Community emergency network ready")
         startConnectivityMonitor()
+        startHeartbeat()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,6 +87,7 @@ class MeshService : Service() {
 
     override fun onDestroy() {
         locationJob?.cancel()
+        heartbeatJob?.cancel()
         if (::nearbyMeshManager.isInitialized) nearbyMeshManager.stop()
         if (::lanMeshManager.isInitialized) lanMeshManager.stop()
         if (::alarmController.isInitialized) alarmController.release()
@@ -148,7 +151,8 @@ class MeshService : Service() {
             CommunityMessageType.LOCATION_UPDATE,
             CommunityMessageType.RECEIVED,
             CommunityMessageType.ACKNOWLEDGED,
-            CommunityMessageType.RESPONDING -> Unit
+            CommunityMessageType.RESPONDING,
+            CommunityMessageType.HEARTBEAT -> Unit
         }
     }
 
@@ -190,6 +194,25 @@ class MeshService : Service() {
             createdAtEpochMs = System.currentTimeMillis()
         )
         emitSigned(unsigned)
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                emitSigned(
+                    CommunityMessage(
+                        messageId = UUID.randomUUID().toString(),
+                        alertId = "heartbeat-${config.terminalId}",
+                        type = CommunityMessageType.HEARTBEAT,
+                        actorId = config.terminalId,
+                        actorName = config.terminalName,
+                        createdAtEpochMs = System.currentTimeMillis()
+                    )
+                )
+                delay(15_000L)
+            }
+        }
     }
 
     private fun startLiveLocation(alertId: String) {
