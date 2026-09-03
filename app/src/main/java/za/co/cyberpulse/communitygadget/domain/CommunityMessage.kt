@@ -6,7 +6,8 @@ enum class CommunityMessageType {
     ACKNOWLEDGED,
     RESPONDING,
     LOCATION_UPDATE,
-    END_ALERT
+    END_ALERT,
+    HEARTBEAT
 }
 
 data class CommunityMessage(
